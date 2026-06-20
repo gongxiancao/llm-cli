@@ -1,0 +1,184 @@
+use crate::config::Config;
+use crate::types::*;
+use anyhow::{Context, Result};
+use base64::Engine;
+use std::path::Path;
+
+pub struct Provider {
+    client: reqwest::Client,
+    config: Config,
+}
+
+impl Provider {
+    pub fn new(config: Config) -> Self {
+        let client = reqwest::Client::builder()
+            .build()
+            .expect("Failed to create HTTP client");
+        Self { client, config }
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    async fn post(&self, path: &str, body: &serde_json::Value) -> Result<reqwest::Response> {
+        let url = format!("{}{}", self.config.api_base.trim_end_matches('/'), path);
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .header("Content-Type", "application/json")
+            .json(body)
+            .send()
+            .await
+            .with_context(|| format!("Request to {url} failed"))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if let Ok(err) = serde_json::from_str::<ErrorResponse>(&text) {
+                anyhow::bail!("API error ({}): {}", status, err.error.message);
+            }
+            anyhow::bail!("API error ({}): {}", status, text);
+        }
+        Ok(resp)
+    }
+
+    pub async fn chat(
+        &self,
+        model: &str,
+        system: Option<&str>,
+        messages: Vec<&str>,
+        temperature: Option<f32>,
+        max_tokens: Option<u32>,
+    ) -> Result<ChatResponse> {
+        let mut msgs = Vec::new();
+        if let Some(sys) = system {
+            msgs.push(Message {
+                role: "system".to_string(),
+                content: vec![ContentPart::Text {
+                    text: sys.to_string(),
+                }],
+            });
+        }
+        for msg in messages {
+            msgs.push(Message {
+                role: "user".to_string(),
+                content: vec![ContentPart::Text {
+                    text: msg.to_string(),
+                }],
+            });
+        }
+
+        let req = ChatRequest {
+            model: model.to_string(),
+            messages: msgs,
+            temperature,
+            max_tokens,
+        };
+
+        let resp = self
+            .post("/chat/completions", &serde_json::to_value(&req)?)
+            .await?;
+        let chat_resp: ChatResponse = resp
+            .json()
+            .await
+            .context("Failed to parse chat response")?;
+        Ok(chat_resp)
+    }
+
+    pub async fn vision(
+        &self,
+        model: &str,
+        system: Option<&str>,
+        text: &str,
+        image_paths: &[String],
+        temperature: Option<f32>,
+        max_tokens: Option<u32>,
+    ) -> Result<ChatResponse> {
+        let mut content_parts = Vec::new();
+        content_parts.push(ContentPart::Text {
+            text: text.to_string(),
+        });
+
+        for path in image_paths {
+            let data_url = encode_image(path)?;
+            content_parts.push(ContentPart::ImageUrl {
+                image_url: ImageUrl { url: data_url },
+            });
+        }
+
+        let mut msgs = Vec::new();
+        if let Some(sys) = system {
+            msgs.push(Message {
+                role: "system".to_string(),
+                content: vec![ContentPart::Text {
+                    text: sys.to_string(),
+                }],
+            });
+        }
+        msgs.push(Message {
+            role: "user".to_string(),
+            content: content_parts,
+        });
+
+        let req = ChatRequest {
+            model: model.to_string(),
+            messages: msgs,
+            temperature,
+            max_tokens,
+        };
+
+        let resp = self
+            .post("/chat/completions", &serde_json::to_value(&req)?)
+            .await?;
+        let chat_resp: ChatResponse = resp
+            .json()
+            .await
+            .context("Failed to parse vision response")?;
+        Ok(chat_resp)
+    }
+
+    pub async fn imagine(
+        &self,
+        model: &str,
+        prompt: &str,
+        n: Option<u32>,
+        size: Option<&str>,
+    ) -> Result<ImageGenerationResponse> {
+        let req = ImageGenerationRequest {
+            prompt: prompt.to_string(),
+            model: model.to_string(),
+            n,
+            size: size.map(|s| s.to_string()),
+        };
+
+        let resp = self
+            .post("/images/generations", &serde_json::to_value(&req)?)
+            .await?;
+        let img_resp: ImageGenerationResponse = resp
+            .json()
+            .await
+            .context("Failed to parse image generation response")?;
+        Ok(img_resp)
+    }
+}
+
+fn encode_image(path: &str) -> Result<String> {
+    let p = Path::new(path);
+    let data = std::fs::read(p).with_context(|| format!("Failed to read image: {path}"))?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    let mime = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => "image/png",
+    };
+    Ok(format!("data:{mime};base64,{b64}"))
+}
