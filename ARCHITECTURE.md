@@ -166,6 +166,101 @@ clap parse → cli::Commands
 
 ---
 
+## Usage
+
+### 初始化配置
+
+```bash
+# 首次使用需要设置 API Key
+llm-cli config set api_key "sk-xxx"
+
+# 查看当前配置
+llm-cli config show
+
+# 切换 Provider（以百炼为例）
+llm-cli config set api_base "https://dashscope.aliyuncs.com/compatible-mode/v1"
+llm-cli config set model "qwen-plus"
+llm-cli config set vision_model "qwen-vl-plus"
+llm-cli config set image_model "qwen-image-2.0-pro"
+
+# 百炼图像生成需要额外设置 multimodal-generation 端点
+llm-cli config set dashscope_endpoint "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+```
+
+### chat — 文本生成
+
+```bash
+# 简单对话
+llm-cli chat "你好"
+
+# 带 system prompt
+llm-cli chat "解释什么是Rust" --system "你是一个Rust专家"
+
+# 覆盖模型和参数
+llm-cli chat "写一首诗" --model gpt-4o --temperature 0.8 --max-tokens 500
+```
+
+参数：
+| 参数 | 说明 |
+|------|------|
+| `<message>` | 发送的消息（必填） |
+| `--model` | 模型名，覆盖配置文件中的 `model` |
+| `--system` | 系统提示词 |
+| `--temperature` | 温度值 (0.0–2.0) |
+| `--max-tokens` | 最大输出 token 数 |
+
+### vision — 图像理解
+
+```bash
+# 单图分析
+llm-cli vision "描述这张图片" photo.jpg
+
+# 多图分析
+llm-cli vision "这些图片有什么共同点" photo1.jpg photo2.png
+
+# 指定模型
+llm-cli vision "图中是什么？" img.jpg --model qwen-vl-plus
+```
+
+参数：
+| 参数 | 说明 |
+|------|------|
+| `<prompt>` | 文本提示词（必填） |
+| `<images>` | 图片路径，支持多个（必填至少一个） |
+| `--model` | 模型名，覆盖配置文件中的 `vision_model` |
+| `--system` | 系统提示词 |
+| `--temperature` | 温度值 (0.0–2.0) |
+| `--max-tokens` | 最大输出 token 数 |
+
+支持格式：jpg / jpeg / png / gif / webp，自动 base64 编码后发送。
+
+### imagine — 图像生成
+
+```bash
+# 文生图
+llm-cli imagine "一只戴帽子的猫"
+
+# 指定数量、尺寸
+llm-cli imagine "赛博朋克城市" --n 2 --size 1024x1024
+
+# 指定模型
+llm-cli imagine "水墨风格山水" --model dall-e-3
+```
+
+参数：
+| 参数 | 说明 |
+|------|------|
+| `<prompt>` | 图像描述（必填） |
+| `--model` | 模型名，覆盖配置文件中的 `image_model` |
+| `--n` | 生成数量（默认 1） |
+| `--size` | 图像尺寸，如 `1024x1024`、`1792x1024` |
+
+**Provider 适配说明：**
+- OpenAI 兼容（默认）：使用 `api_base` + `image_api_path`（默认 `/images/generations`）
+- 百炼 Dashscope：需额外设置 `dashscope_endpoint`，启用后自动切换为 multimodal-generation 接口
+
+---
+
 ## Development Philosophy
 
 优先构建最小可用原型，再基于原型逐步添加功能。每一步都产出可运行的版本，确保核心链路始终通畅。
