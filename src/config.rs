@@ -15,6 +15,14 @@ pub struct Config {
     pub temperature: f32,
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
+    #[serde(default = "default_image_api_path")]
+    pub image_api_path: String,
+    #[serde(default)]
+    pub dashscope_endpoint: String,
+}
+
+fn default_image_api_path() -> String {
+    "/images/generations".to_string()
 }
 
 fn default_image_model() -> String {
@@ -43,17 +51,20 @@ impl Default for Config {
             vision_model: default_vision_model(),
             temperature: default_temperature(),
             max_tokens: default_max_tokens(),
+            image_api_path: default_image_api_path(),
+            dashscope_endpoint: String::new(),
         }
     }
 }
 
 fn config_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("llm-cli")
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    home.join(".config").join("llm-cli")
 }
 
-fn config_path() -> PathBuf {
+pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
 
@@ -95,7 +106,9 @@ pub fn set(key: &str, value: &str) -> Result<Config> {
         "max_tokens" => {
             config.max_tokens = value.parse().context("max_tokens must be an integer")?
         }
-        _ => anyhow::bail!("Unknown config key: {key}. Valid keys: api_base, api_key, model, image_model, vision_model, temperature, max_tokens"),
+        "image_api_path" => config.image_api_path = value.to_string(),
+        "dashscope_endpoint" => config.dashscope_endpoint = value.to_string(),
+        _ => anyhow::bail!("Unknown config key: {key}. Valid keys: api_base, api_key, model, image_model, vision_model, image_api_path, dashscope_endpoint, temperature, max_tokens"),
     }
     save(&config)?;
     Ok(config)

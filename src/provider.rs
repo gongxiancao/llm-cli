@@ -21,11 +21,33 @@ impl Provider {
         &self.config
     }
 
-    async fn post(&self, path: &str, body: &serde_json::Value) -> Result<reqwest::Response> {
-        let url = format!("{}{}", self.config.api_base.trim_end_matches('/'), path);
+    async fn post(&self, base: &str, path: &str, body: &serde_json::Value) -> Result<reqwest::Response> {
+        let url = format!("{}{}", base.trim_end_matches('/'), path);
         let resp = self
             .client
             .post(&url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .header("Content-Type", "application/json")
+            .json(body)
+            .send()
+            .await
+            .with_context(|| format!("Request to {url} failed"))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if let Ok(err) = serde_json::from_str::<ErrorResponse>(&text) {
+                anyhow::bail!("API error ({}): {}", status, err.error.message);
+            }
+            anyhow::bail!("API error ({}): {}", status, text);
+        }
+        Ok(resp)
+    }
+
+    async fn post_raw(&self, url: &str, body: &serde_json::Value) -> Result<reqwest::Response> {
+        let resp = self
+            .client
+            .post(url)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
             .json(body)
@@ -78,7 +100,7 @@ impl Provider {
         };
 
         let resp = self
-            .post("/chat/completions", &serde_json::to_value(&req)?)
+            .post(&self.config.api_base, "/chat/completions", &serde_json::to_value(&req)?)
             .await?;
         let chat_resp: ChatResponse = resp
             .json()
@@ -130,7 +152,7 @@ impl Provider {
         };
 
         let resp = self
-            .post("/chat/completions", &serde_json::to_value(&req)?)
+            .post(&self.config.api_base, "/chat/completions", &serde_json::to_value(&req)?)
             .await?;
         let chat_resp: ChatResponse = resp
             .json()
@@ -154,13 +176,64 @@ impl Provider {
         };
 
         let resp = self
-            .post("/images/generations", &serde_json::to_value(&req)?)
+            .post(&self.config.api_base, &self.config.image_api_path, &serde_json::to_value(&req)?)
             .await?;
         let img_resp: ImageGenerationResponse = resp
             .json()
             .await
             .context("Failed to parse image generation response")?;
         Ok(img_resp)
+    }
+
+    pub async fn imagine_dashscope(
+        &self,
+        model: &str,
+        prompt: &str,
+        n: Option<u32>,
+        size: Option<&str>,
+    ) -> Result<Vec<String>> {
+        let dashscope_size = size.map(|s| s.replace('x', "*"));
+
+        let content = vec![DashscopeContentPart::Text { text: prompt.to_string() }];
+        let msg = DashscopeMessage {
+            role: "user".to_string(),
+            content,
+        };
+        let params = DashscopeParameters {
+            n,
+            size: dashscope_size,
+        };
+        let req = DashscopeRequest {
+            model: model.to_string(),
+            input: DashscopeInput { messages: vec![msg] },
+            parameters: Some(params),
+        };
+
+        let resp = self
+            .post_raw(&self.config.dashscope_endpoint, &serde_json::to_value(&req)?)
+            .await?;
+        let ds_resp: DashscopeResponse = resp
+            .json()
+            .await
+            .context("Failed to parse dashscope image response")?;
+
+        let mut urls = Vec::new();
+        for choice in &ds_resp.output.choices {
+            for part in &choice.message.content {
+                if let DashscopeResponseContent::Image { image } = part {
+                    urls.push(image.clone());
+                }
+            }
+        }
+        if let Some(usage) = &ds_resp.usage {
+            eprintln!(
+                "  Tokens: {} input + {} output = {} total",
+                usage.input_tokens.unwrap_or(0),
+                usage.output_tokens.unwrap_or(0),
+                usage.total_tokens.unwrap_or(0)
+            );
+        }
+        Ok(urls)
     }
 }
 

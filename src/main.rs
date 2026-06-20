@@ -106,15 +106,27 @@ async fn main() -> Result<()> {
             }
             let provider = Provider::new(config);
             let model = model.unwrap_or_else(|| provider.config().image_model.clone());
-            let resp = provider
-                .imagine(&model, &prompt, Some(n), size.as_deref())
-                .await?;
-            for (i, img) in resp.data.iter().enumerate() {
-                if let Some(url) = &img.url {
+            if !provider.config().dashscope_endpoint.is_empty() {
+                let urls = provider
+                    .imagine_dashscope(&model, &prompt, Some(n), size.as_deref())
+                    .await?;
+                for (i, url) in urls.iter().enumerate() {
                     println!("[{i}] {url}");
                 }
-                if let Some(b64) = &img.b64_json {
-                    println!("[{i}] (base64, {} bytes)", b64.len());
+                if urls.is_empty() {
+                    eprintln!("No images returned");
+                }
+            } else {
+                let resp = provider
+                    .imagine(&model, &prompt, Some(n), size.as_deref())
+                    .await?;
+                for (i, img) in resp.data.iter().enumerate() {
+                    if let Some(url) = &img.url {
+                        println!("[{i}] {url}");
+                    }
+                    if let Some(b64) = &img.b64_json {
+                        println!("[{i}] (base64, {} bytes)", b64.len());
+                    }
                 }
             }
         }
@@ -133,6 +145,15 @@ async fn main() -> Result<()> {
                         format!("{}...", &cfg.api_key[..cfg.api_key.len().min(8)])
                     }
                 );
+                println!("image_api_path = {}", cfg.image_api_path);
+                println!(
+                    "dashscope_endpoint = {}",
+                    if cfg.dashscope_endpoint.is_empty() {
+                        "(not set, using openai format)".to_string()
+                    } else {
+                        cfg.dashscope_endpoint.clone()
+                    }
+                );
                 println!("temperature = {}", cfg.temperature);
                 println!("max_tokens = {}", cfg.max_tokens);
             }
@@ -142,11 +163,7 @@ async fn main() -> Result<()> {
                 if key == "api_key" {
                     println!("API key saved to config file.");
                 }
-                let path = dirs::config_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join("llm-cli")
-                    .join("config.toml");
-                println!("Config saved to: {}", path.display());
+                println!("Config saved to: {}", config::config_path().display());
             }
         },
     }
