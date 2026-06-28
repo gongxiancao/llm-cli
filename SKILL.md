@@ -18,7 +18,7 @@ Agent's own LLM handles text reasoning; llm-cli covers the image side.
 llm-cli binary must be in PATH. If not found, install it:
 
 ```bash
-curl -sfL https://github.com/you/llm-cli/releases/latest/download/install.sh | sh
+curl -sfL https://github.com/gongxiancao/llm-cli/releases/latest/download/install.sh | sh
 ```
 
 This detects OS/architecture and downloads the matching static binary to `~/.local/bin/`.

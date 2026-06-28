@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="you/llm-cli"
+REPO="gongxiancao/llm-cli"
 BINARY="llm-cli"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
